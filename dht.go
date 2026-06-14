@@ -279,7 +279,8 @@ func (dht *DHT) discoverNAT() {
 		return
 	}
 
-	// STUN discovery
+	// STUN discovery — use the DHT's own UDP socket so the returned
+	// public port matches the actual DHT port's NAT mapping.
 	if dht.NATConfig == nil || !dht.NATConfig.Enabled {
 		return
 	}
@@ -288,8 +289,7 @@ func (dht *DHT) discoverNAT() {
 		dht.NATConfig.STUNServers = DefaultSTUNServers
 	}
 
-	localAddr := dht.node.addr.String()
-	info, err := DiscoverNAT(dht.NATConfig.STUNServers, localAddr, 5*time.Second)
+	info, err := DiscoverNATWithConn(dht.conn, dht.NATConfig.STUNServers, 5*time.Second)
 	if err != nil {
 		// STUN failed — try HTTP fallback
 		ip, httpErr := getRemoteIP()
@@ -304,7 +304,6 @@ func (dht *DHT) discoverNAT() {
 				return
 			}
 		}
-		// Both failed — DHT works in outbound-only mode
 		return
 	}
 	dht.natInfo = info

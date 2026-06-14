@@ -165,24 +165,26 @@ func stunBind(stunServer string, localAddr *net.UDPAddr, timeout time.Duration) 
 	}
 	defer conn.Close()
 
+	return stunBindWithConn(conn, raddr, timeout)
+}
+
+// stunBindWithConn sends a STUN binding request using an existing UDP connection.
+// This allows STUN to use the DHT's own socket, so the returned public address
+// correctly reflects the DHT port's NAT mapping (not an ephemeral port).
+func stunBindWithConn(conn *net.UDPConn, raddr *net.UDPAddr, timeout time.Duration) (net.IP, int, error) {
 	// Build STUN binding request
-	// Header: 2(type) + 2(len) + 4(magic) + 12(transID) = 20 bytes
 	request := make([]byte, 20)
 	binary.BigEndian.PutUint16(request[0:2], stunBindingRequest)
-	// Length = 0 for binding request
 	binary.BigEndian.PutUint32(request[4:8], stunMagicCookie)
-	// Random transaction ID
 	transID := make([]byte, 12)
 	rand.Read(transID)
 	copy(request[8:20], transID)
 
-	// Send request
-	_, err = conn.WriteToUDP(request, raddr)
+	_, err := conn.WriteToUDP(request, raddr)
 	if err != nil {
 		return nil, 0, fmt.Errorf("send STUN request: %w", err)
 	}
 
-	// Read response
 	conn.SetReadDeadline(time.Now().Add(timeout))
 	buf := make([]byte, 1500)
 	n, _, err := conn.ReadFromUDP(buf)
@@ -210,13 +212,13 @@ func stunBind(stunServer string, localAddr *net.UDPAddr, timeout time.Duration) 
 // DiscoverNAT probes STUN servers to discover the public IP:port mapping.
 // Uses a random local port for the STUN socket (must not conflict with the
 // DHT listener which already holds the configured port).
+// Prefer DiscoverNATWithConn when you have the DHT socket — it returns
+// the correct public port mapping for the DHT port.
 func DiscoverNAT(servers []string, localAddr string, timeout time.Duration) (*NATInfo, error) {
 	if len(servers) == 0 {
 		servers = DefaultSTUNServers
 	}
 
-	// Use a random local port for STUN — the DHT listener already owns the
-	// configured port, and we just need any port for the STUN query.
 	addr, err := net.ResolveUDPAddr("udp", ":0")
 	if err != nil {
 		return nil, fmt.Errorf("resolve local address: %w", err)
@@ -233,6 +235,38 @@ func DiscoverNAT(servers []string, localAddr string, timeout time.Duration) (*NA
 			PublicIP:   ip,
 			PublicPort: port,
 			LocalAddr:  addr,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("all STUN servers failed, last error: %w", lastErr)
+}
+
+// DiscoverNATWithConn probes STUN servers using an existing UDP connection.
+// This is the preferred method for DHT — it uses the DHT's own socket,
+// so the returned public port correctly reflects the DHT port's NAT mapping.
+func DiscoverNATWithConn(conn *net.UDPConn, servers []string, timeout time.Duration) (*NATInfo, error) {
+	if len(servers) == 0 {
+		servers = DefaultSTUNServers
+	}
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+
+	var lastErr error
+	for _, server := range servers {
+		raddr, err := net.ResolveUDPAddr("udp", server)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		ip, port, err := stunBindWithConn(conn, raddr, timeout)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return &NATInfo{
+			PublicIP:   ip,
+			PublicPort: port,
+			LocalAddr:  localAddr,
 		}, nil
 	}
 
