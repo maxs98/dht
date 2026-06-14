@@ -24,13 +24,17 @@ const (
 	stunAttrXorMappedAddress = 0x0020
 )
 
-// Default public STUN servers
+// Default public STUN servers (IPv4)
 var DefaultSTUNServers = []string{
 	"stun.l.google.com:19302",
 	"stun1.l.google.com:19302",
 	"stun2.l.google.com:19302",
-	"stun3.l.google.com:19302",
-	"stun4.l.google.com:19302",
+}
+
+// DefaultSTUNServers6 are IPv6-capable STUN servers.
+var DefaultSTUNServers6 = []string{
+	"stun.l.google.com:19302",
+	"stun1.l.google.com:19302",
 }
 
 // NATConfig holds NAT traversal configuration.

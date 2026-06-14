@@ -481,7 +481,7 @@ func handleRequest(dht *DHT, addr *net.UDPAddr,
 				return
 			}
 
-			var nodes string
+			var nodes, nodes6 string
 			targetID := newBitmapFromString(target)
 
 			no, _ := dht.routingTable.GetNodeKBucktByID(targetID)
@@ -492,12 +492,21 @@ func handleRequest(dht *DHT, addr *net.UDPAddr,
 					dht.routingTable.GetNeighborCompactInfos(targetID, dht.K),
 					"",
 				)
+				// Also collect IPv6 nodes (BEP-32)
+				nodes6 = strings.Join(
+					dht.routingTable.GetNeighborCompactInfos6(targetID, dht.K),
+					"",
+				)
 			}
 
-			send(dht, addr, makeResponse(t, map[string]interface{}{
+			resp := map[string]interface{}{
 				"id":    dht.id(target),
 				"nodes": nodes,
-			}))
+			}
+			if nodes6 != "" {
+				resp["nodes6"] = nodes6
+			}
+			send(dht, addr, makeResponse(t, resp))
 		}
 	case getPeersType:
 		if err := ParseKey(a, "info_hash", "string"); err != nil {
@@ -592,30 +601,53 @@ func handleRequest(dht *DHT, addr *net.UDPAddr,
 // findOn puts nodes in the response to the routingTable, then if target is in
 // the nodes or all nodes are in the routingTable, it stops. Otherwise it
 // continues to findNode or getPeers.
+// Handles both IPv4 (26-byte) and IPv6 (38-byte) compact node info,
+// as well as the nodes6 field (BEP-32).
 func findOn(dht *DHT, r map[string]interface{}, target *bitmap,
 	queryType string) error {
 
-	if err := ParseKey(r, "nodes", "string"); err != nil {
-		return err
-	}
-
-	nodes := r["nodes"].(string)
-	if len(nodes)%26 != 0 {
-		return errors.New("the length of nodes should can be divided by 26")
-	}
-
 	hasNew, found := false, false
-	for i := 0; i < len(nodes)/26; i++ {
-		no, _ := newNodeFromCompactInfo(
-			string(nodes[i*26:(i+1)*26]), dht.Network)
-
-		if no.id.RawString() == target.RawString() {
-			found = true
+	processNodes := func(nodesStr string, chunkSize int) {
+		if len(nodesStr)%chunkSize != 0 {
+			return
 		}
+		for i := 0; i < len(nodesStr)/chunkSize; i++ {
+			no, err := newNodeFromCompactInfo(
+				string(nodesStr[i*chunkSize:(i+1)*chunkSize]), dht.Network)
+			if err != nil {
+				continue
+			}
 
-		if dht.routingTable.Insert(no) {
-			hasNew = true
+			if no.id.RawString() == target.RawString() {
+				found = true
+			}
+
+			if dht.routingTable.Insert(no) {
+				hasNew = true
+			}
 		}
+	}
+
+	// Try nodes field (IPv4: 26 bytes, or mixed)
+	if nodesStr, ok := r["nodes"]; ok {
+		if nodes, ok := nodesStr.(string); ok {
+			if len(nodes)%26 == 0 {
+				processNodes(nodes, 26)
+			} else if len(nodes)%38 == 0 {
+				processNodes(nodes, 38)
+			}
+		}
+	}
+
+	// Try nodes6 field (IPv6: 38 bytes) — BEP-32
+	if nodes6Str, ok := r["nodes6"]; ok {
+		if nodes, ok := nodes6Str.(string); ok {
+			processNodes(nodes, 38)
+		}
+	}
+
+	if !hasNew && !found {
+		return nil
 	}
 
 	if found || !hasNew {

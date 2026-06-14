@@ -105,6 +105,34 @@ func NewStandardConfig() *Config {
 	}
 }
 
+// NewStandardConfig6 returns a Config pointer for IPv6 DHT (BEP-32).
+func NewStandardConfig6() *Config {
+	return &Config{
+		K:           8,
+		KBucketSize: 8,
+		Network:     "udp6",
+		Address:     ":6881",
+		PrimeNodes: []string{
+			"router.bittorrent.com:6881",
+			"router.utorrent.com:6881",
+			"dht.transmissionbt.com:6881",
+		},
+		NodeExpriedAfter:     time.Duration(time.Minute * 15),
+		KBucketExpiredAfter:  time.Duration(time.Minute * 15),
+		CheckKBucketPeriod:   time.Duration(time.Second * 30),
+		TokenExpiredAfter:    time.Duration(time.Minute * 10),
+		MaxTransactionCursor: math.MaxUint32,
+		MaxNodes:             5000,
+		BlockedIPs:           make([]string, 0),
+		BlackListMaxSize:     65536,
+		Try:                  2,
+		Mode:                 StandardMode,
+		PacketJobLimit:       1024,
+		PacketWorkerLimit:    256,
+		RefreshNodeNum:       8,
+	}
+}
+
 // NewCrawlConfig returns a config in crawling mode.
 func NewCrawlConfig() *Config {
 	config := NewStandardConfig()

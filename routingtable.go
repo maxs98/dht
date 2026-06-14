@@ -34,15 +34,23 @@ func newNode(id, network, address string) (*node, error) {
 }
 
 // newNodeFromCompactInfo parses compactNodeInfo and returns a node pointer.
+// IPv4: 26 bytes (20 ID + 4 IP + 2 port) — BEP-5
+// IPv6: 38 bytes (20 ID + 16 IP + 2 port) — BEP-32
 func newNodeFromCompactInfo(
 	compactNodeInfo string, network string) (*node, error) {
 
-	if len(compactNodeInfo) != 26 {
-		return nil, errors.New("compactNodeInfo should be a 26-length string")
+	switch len(compactNodeInfo) {
+	case 26: // IPv4
+	case 38: // IPv6
+	default:
+		return nil, errors.New("compactNodeInfo should be 26 (IPv4) or 38 (IPv6) bytes")
 	}
 
 	id := compactNodeInfo[:20]
-	ip, port, _ := decodeCompactIPPortInfo(compactNodeInfo[20:])
+	ip, port, err := decodeCompactIPPortInfo(compactNodeInfo[20:])
+	if err != nil {
+		return nil, err
+	}
 
 	return newNode(id, network, genAddress(ip.String(), port))
 }
@@ -432,15 +440,39 @@ func (rt *routingTable) GetNeighbors(id *bitmap, size int) []*node {
 	return result
 }
 
-// GetNeighborIds return the size-length compact node info closest to id.
+// GetNeighborCompactInfos return the size-length compact node info closest to id.
+// Returns only IPv4 nodes (26 bytes each).
 func (rt *routingTable) GetNeighborCompactInfos(id *bitmap, size int) []string {
-	neighbors := rt.GetNeighbors(id, size)
-	infos := make([]string, len(neighbors))
+	neighbors := rt.GetNeighbors(id, size*2) // fetch more to filter
+	infos := make([]string, 0, size)
 
-	for i, no := range neighbors {
-		infos[i] = no.CompactNodeInfo()
+	for _, no := range neighbors {
+		info, _ := encodeCompactIPPortInfo(no.addr.IP, no.addr.Port)
+		if len(info) == 6 { // IPv4 only
+			infos = append(infos, no.CompactNodeInfo())
+			if len(infos) >= size {
+				break
+			}
+		}
 	}
+	return infos
+}
 
+// GetNeighborCompactInfos6 returns the size-length compact IPv6 node info
+// closest to id (38 bytes each, BEP-32).
+func (rt *routingTable) GetNeighborCompactInfos6(id *bitmap, size int) []string {
+	neighbors := rt.GetNeighbors(id, size*2)
+	infos := make([]string, 0, size)
+
+	for _, no := range neighbors {
+		info, _ := encodeCompactIPPortInfo(no.addr.IP, no.addr.Port)
+		if len(info) == 18 { // IPv6 only
+			infos = append(infos, no.CompactNodeInfo())
+			if len(infos) >= size {
+				break
+			}
+		}
+	}
 	return infos
 }
 

@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -51,19 +50,28 @@ func int2bytes(val uint64) []byte {
 
 // decodeCompactIPPortInfo decodes compactIP-address/port info in BitTorrent
 // DHT Protocol. It returns the ip and port number.
+// For IPv4: 6 bytes (4 IP + 2 port)
+// For IPv6: 18 bytes (16 IP + 2 port) — BEP-32
 func decodeCompactIPPortInfo(info string) (ip net.IP, port int, err error) {
-	if len(info) != 6 {
-		err = errors.New("compact info should be 6-length long")
-		return
+	switch len(info) {
+	case 6:
+		// IPv4
+		ip = net.IPv4(info[0], info[1], info[2], info[3])
+		port = int((uint16(info[4]) << 8) | uint16(info[5]))
+	case 18:
+		// IPv6
+		ip = make(net.IP, 16)
+		copy(ip, info[:16])
+		port = int((uint16(info[16]) << 8) | uint16(info[17]))
+	default:
+		err = errors.New("compact info should be 6 or 18 bytes long")
 	}
-
-	ip = net.IPv4(info[0], info[1], info[2], info[3])
-	port = int((uint16(info[4]) << 8) | uint16(info[5]))
 	return
 }
 
 // encodeCompactIPPortInfo encodes an ip and a port number to
 // compactIP-address/port info.
+// IPv4 → 6 bytes, IPv6 → 18 bytes (BEP-32).
 func encodeCompactIPPortInfo(ip net.IP, port int) (info string, err error) {
 	if port > 65535 || port < 0 {
 		err = errors.New(
@@ -77,7 +85,19 @@ func encodeCompactIPPortInfo(ip net.IP, port int) (info string, err error) {
 		p[0] = 0
 	}
 
-	info = string(append(ip, p...))
+	ip4 := ip.To4()
+	if ip4 != nil {
+		// IPv4: 6 bytes
+		info = string(append(ip4, p...))
+	} else {
+		// IPv6: 18 bytes (16 IP + 2 port)
+		ip16 := ip.To16()
+		if ip16 == nil {
+			err = errors.New("invalid IP address")
+			return
+		}
+		info = string(append(ip16, p...))
+	}
 	return
 }
 
@@ -129,6 +149,7 @@ func getRemoteIP() (ip string, err error) {
 }
 
 // genAddress returns a ip:port address.
+// Uses [ip]:port format for IPv6 addresses.
 func genAddress(ip string, port int) string {
-	return strings.Join([]string{ip, strconv.Itoa(port)}, ":")
+	return net.JoinHostPort(ip, strconv.Itoa(port))
 }
