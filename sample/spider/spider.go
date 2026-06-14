@@ -141,12 +141,16 @@ func main() {
 
 	d := dht.New(config)
 
-	// Print public address
-	if addr := d.PublicAddr(); addr != nil && addr.IP != nil {
-		log.Printf("📡 Public address: %s", addr.String())
-	} else if d.PublicAddr() != nil && d.PublicAddr().IP == nil {
-		log.Println("⚠️  NAT discovery failed — running in outbound-only mode (crawler still works)")
-	}
+	// Run DHT in background so we can print status once it's ready
+	go func() {
+		// Wait for DHT to initialize (discoverNAT runs inside Run)
+		time.Sleep(2 * time.Second)
+		if addr := d.PublicAddr(); addr != nil && addr.IP != nil {
+			log.Printf("📡 Public address: %s", addr.String())
+		} else {
+			log.Println("⚠️  NAT discovery failed — running in outbound-only mode (crawler still works)")
+		}
+	}()
 
 	// Stats goroutine
 	if *statsInterval > 0 {
