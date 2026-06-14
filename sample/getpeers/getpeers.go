@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/shiyanhui/dht"
+	"github.com/maxs98/dht"
 )
 
 func main() {

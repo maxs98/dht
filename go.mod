@@ -1,3 +1,3 @@
-module github.com/shiyanhui/dht
+module github.com/maxs98/dht
 
-go 1.15
+go 1.21

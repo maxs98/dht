@@ -2,7 +2,7 @@
 
 See the video on the [Youtube](https://www.youtube.com/watch?v=AIpeQtw22kc).
 
-[中文版README](https://github.com/shiyanhui/dht/blob/master/README_CN.md)
+[中文版README](https://github.com/maxs98/dht/blob/master/README_CN.md)
 
 ## Introduction
 
@@ -22,17 +22,17 @@ standard BEPs protocol. With the crawling mode, you can build another [BTDigg](h
 
 ## Installation
 
-    go get github.com/shiyanhui/dht
+    go get github.com/maxs98/dht
 
 ## Example
 
-Below is a simple spider. You can move [here](https://github.com/shiyanhui/dht/blob/master/sample)
+Below is a simple spider. You can move [here](https://github.com/maxs98/dht/blob/master/sample)
 to see more samples.
 
 ```go
 import (
     "fmt"
-    "github.com/shiyanhui/dht"
+    "github.com/maxs98/dht"
 )
 
 func main() {
@@ -56,19 +56,56 @@ func main() {
 }
 ```
 
-## Download
+### NAT Traversal (NEW)
 
-You can download the demo compiled binary file [here](https://github.com/shiyanhui/dht/files/407021/spider.zip).
+The crawler can now run behind NAT (e.g. in a LAN or behind a home router) using STUN-based
+NAT traversal. This discovers your public IP and port mapping, and keeps the UDP port
+mapping alive with periodic keepalive pings.
+
+**Usage:**
+
+```go
+// Automatic STUN discovery
+config := dht.NewNATCrawlConfig()
+
+// Manual public IP (if you know it)
+config := dht.NewNATCrawlConfigWithIP("1.2.3.4", 6881)
+
+// Or configure manually
+config := dht.NewCrawlConfig()
+config.NATConfig = &dht.NATConfig{
+    Enabled:     true,
+    STUNServers: []string{"stun.l.google.com:19302"},
+}
+
+d := dht.New(config)
+
+// Print the discovered public address
+log.Printf("Public address: %s", d.PublicAddr())
+```
+
+**How it works:**
+1. Queries public STUN servers (Google's by default) to discover your public IP:port
+2. Uses the discovered address for DHT communication (announce_peer, etc.)
+3. Sends periodic keepalive pings (every 25s) to keep the NAT mapping alive
+4. Falls back to outbound-only mode if STUN discovery fails — the crawler still works
+
+**CLI flags (spider sample):**
+```bash
+go run sample/spider/spider.go --nat
+go run sample/spider/spider.go --public-ip=1.2.3.4 --public-port=6881
+```
 
 ## Note
 
 - The default crawl mode configure costs about 300M RAM. Set **MaxNodes**
   and **BlackListMaxSize** to fit yourself.
-- Now it cant't run in LAN because of NAT.
+- ✅ NAT traversal is now supported via STUN (RFC 5389). Use `NewNATCrawlConfig()`.
+- DHT routing table entries on remote nodes use the public IP discovered via STUN.
 
 ## TODO
 
-- [ ] NAT Traversal.
+- [x] NAT Traversal.
 - [ ] Implements the full BEP-3.
 - [ ] Optimization.
 
@@ -79,9 +116,8 @@ You can download the demo compiled binary file [here](https://github.com/shiyanh
 Well, maybe there are several reasons.
 
 - DHT aims to implements the standard BitTorrent DHT protocol, not born for crawling the DHT network.
-- NAT Traversal issue. You run the crawler in a local network.
 - It will block ip which looks like bad and a good ip may be mis-judged.
 
 ## License
 
-MIT, read more [here](https://github.com/shiyanhui/dht/blob/master/LICENSE)
+MIT, read more [here](https://github.com/maxs98/dht/blob/master/LICENSE)

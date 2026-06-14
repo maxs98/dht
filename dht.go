@@ -70,6 +70,11 @@ type Config struct {
 	PacketWorkerLimit int
 	// the nodes num to be fresh in a kbucket
 	RefreshNodeNum int
+	// NATConfig contains NAT traversal settings (optional).
+	// If nil, NAT traversal is disabled.
+	NATConfig *NATConfig
+	// NAT traversal information (populated after discovery).
+	natInfo *NATInfo
 }
 
 // NewStandardConfig returns a Config pointer with default values.
@@ -113,6 +118,30 @@ func NewCrawlConfig() *Config {
 	return config
 }
 
+// NewNATCrawlConfig returns a crawl config with NAT traversal enabled.
+// STUN servers are auto-detected using Google's public STUN servers.
+func NewNATCrawlConfig() *Config {
+	config := NewCrawlConfig()
+	config.NATConfig = &NATConfig{
+		Enabled:     true,
+		STUNServers: DefaultSTUNServers,
+	}
+	return config
+}
+
+// NewNATCrawlConfigWithIP returns a crawl config with a manually specified
+// public IP and port. Use this when you already know your public address
+// (e.g., from a port forwarding setup).
+func NewNATCrawlConfigWithIP(publicIP string, publicPort int) *Config {
+	config := NewCrawlConfig()
+	config.NATConfig = &NATConfig{
+		Enabled:     true,
+		PublicIP:    publicIP,
+		PublicPort:  publicPort,
+	}
+	return config
+}
+
 // DHT represents a DHT node.
 type DHT struct {
 	*Config
@@ -126,6 +155,8 @@ type DHT struct {
 	Ready              bool
 	packets            chan packet
 	workerTokens       chan struct{}
+	// natInfo holds the discovered public address (populated if NAT traversal is enabled).
+	natInfo *NATInfo
 }
 
 // New returns a DHT pointer. If config is nil, then config will be set to
@@ -190,9 +221,50 @@ func (dht *DHT) init() {
 	dht.transactionManager = newTransactionManager(
 		dht.MaxTransactionCursor, dht)
 
+	// NAT traversal: discover public IP:port via STUN or config override.
+	dht.discoverNAT()
+
 	go dht.transactionManager.run()
 	go dht.tokenManager.clear()
 	go dht.blackList.clear()
+}
+
+// discoverNAT discovers the public IP:port via STUN or uses manual config.
+func (dht *DHT) discoverNAT() {
+	// Check for manual override
+	if dht.NATConfig != nil && dht.NATConfig.PublicIP != "" {
+		ip := net.ParseIP(dht.NATConfig.PublicIP)
+		if ip == nil {
+			return
+		}
+		port := dht.NATConfig.PublicPort
+		if port == 0 {
+			port = dht.node.addr.Port
+		}
+		dht.natInfo = &NATInfo{
+			PublicIP:   ip,
+			PublicPort: port,
+			LocalAddr:  dht.node.addr,
+		}
+		return
+	}
+
+	// STUN discovery
+	if dht.NATConfig == nil || !dht.NATConfig.Enabled {
+		return
+	}
+
+	if dht.NATConfig.STUNServers == nil || len(dht.NATConfig.STUNServers) == 0 {
+		dht.NATConfig.STUNServers = DefaultSTUNServers
+	}
+
+	localAddr := dht.node.addr.String()
+	info, err := DiscoverNAT(dht.NATConfig.STUNServers, localAddr, 5*time.Second)
+	if err != nil {
+		// Don't panic — DHT can still work in outbound-only mode
+		return
+	}
+	dht.natInfo = info
 }
 
 // join makes current node join the dht network.
@@ -271,6 +343,11 @@ func (dht *DHT) Run() {
 
 	dht.Ready = true
 
+	// NAT keepalive: periodically send pings to keep the UDP port mapping alive.
+	if dht.natInfo != nil {
+		go dht.natKeepalive()
+	}
+
 	var pkt packet
 	tick := time.Tick(dht.CheckKBucketPeriod)
 
@@ -286,4 +363,36 @@ func (dht *DHT) Run() {
 			}
 		}
 	}
+}
+
+// natKeepalive periodically sends pings to random known nodes to keep
+// the NAT UDP port mapping alive. Without this, consumer-grade NAT
+// routers may expire the mapping (typically after 30-120s of inactivity).
+func (dht *DHT) natKeepalive() {
+	ticker := time.NewTicker(25 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if !dht.Ready {
+			return
+		}
+		// Send a ping to the first node in the routing table
+		neighbors := dht.routingTable.GetNeighbors(dht.node.id, 1)
+		for _, no := range neighbors {
+			dht.transactionManager.ping(no)
+			break
+		}
+	}
+}
+
+// PublicAddr returns the public IP:port if NAT traversal discovered one,
+// otherwise returns the local address.
+func (dht *DHT) PublicAddr() *net.UDPAddr {
+	if dht.natInfo != nil {
+		return &net.UDPAddr{
+			IP:   dht.natInfo.PublicIP,
+			Port: dht.natInfo.PublicPort,
+		}
+	}
+	return dht.node.addr
 }

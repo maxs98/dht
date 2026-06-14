@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
-	"github.com/shiyanhui/dht"
+	"github.com/maxs98/dht"
+	"log"
 	"net/http"
 	_ "net/http/pprof"
 )
@@ -22,6 +24,11 @@ type bitTorrent struct {
 }
 
 func main() {
+	natFlag := flag.Bool("nat", false, "Enable NAT traversal via STUN")
+	publicIP := flag.String("public-ip", "", "Manual public IP (overrides STUN)")
+	publicPort := flag.Int("public-port", 0, "Manual public port")
+	flag.Parse()
+
 	go func() {
 		http.ListenAndServe(":6060", nil)
 	}()
@@ -67,11 +74,30 @@ func main() {
 	}()
 	go w.Run()
 
-	config := dht.NewCrawlConfig()
+	var config *dht.Config
+	if *natFlag {
+		config = dht.NewNATCrawlConfig()
+		log.Println("NAT traversal enabled (STUN)")
+	} else if *publicIP != "" {
+		port := *publicPort
+		if port == 0 {
+			port = 6881
+		}
+		config = dht.NewNATCrawlConfigWithIP(*publicIP, port)
+		log.Printf("NAT traversal enabled (manual: %s:%d)", *publicIP, port)
+	} else {
+		config = dht.NewCrawlConfig()
+	}
+
 	config.OnAnnouncePeer = func(infoHash, ip string, port int) {
 		w.Request([]byte(infoHash), ip, port)
 	}
 	d := dht.New(config)
+
+	// Print public address if NAT is enabled
+	if addr := d.PublicAddr(); addr != nil {
+		log.Printf("Public address: %s", addr.String())
+	}
 
 	d.Run()
 }
