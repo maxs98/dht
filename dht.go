@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -258,6 +259,7 @@ func (dht *DHT) init() {
 }
 
 // discoverNAT discovers the public IP:port via STUN or uses manual config.
+// Falls back to HTTP-based IP detection (getRemoteIP) if STUN fails.
 func (dht *DHT) discoverNAT() {
 	// Check for manual override
 	if dht.NATConfig != nil && dht.NATConfig.PublicIP != "" {
@@ -289,7 +291,20 @@ func (dht *DHT) discoverNAT() {
 	localAddr := dht.node.addr.String()
 	info, err := DiscoverNAT(dht.NATConfig.STUNServers, localAddr, 5*time.Second)
 	if err != nil {
-		// Don't panic — DHT can still work in outbound-only mode
+		// STUN failed — try HTTP fallback
+		ip, httpErr := getRemoteIP()
+		if httpErr == nil && ip != "" {
+			parsed := net.ParseIP(strings.TrimSpace(ip))
+			if parsed != nil {
+				dht.natInfo = &NATInfo{
+					PublicIP:   parsed,
+					PublicPort: dht.node.addr.Port,
+					LocalAddr:  dht.node.addr,
+				}
+				return
+			}
+		}
+		// Both failed — DHT works in outbound-only mode
 		return
 	}
 	dht.natInfo = info

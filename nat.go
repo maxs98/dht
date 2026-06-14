@@ -208,12 +208,16 @@ func stunBind(stunServer string, localAddr *net.UDPAddr, timeout time.Duration) 
 }
 
 // DiscoverNAT probes STUN servers to discover the public IP:port mapping.
+// Uses a random local port for the STUN socket (must not conflict with the
+// DHT listener which already holds the configured port).
 func DiscoverNAT(servers []string, localAddr string, timeout time.Duration) (*NATInfo, error) {
 	if len(servers) == 0 {
 		servers = DefaultSTUNServers
 	}
 
-	addr, err := net.ResolveUDPAddr("udp", localAddr)
+	// Use a random local port for STUN — the DHT listener already owns the
+	// configured port, and we just need any port for the STUN query.
+	addr, err := net.ResolveUDPAddr("udp", ":0")
 	if err != nil {
 		return nil, fmt.Errorf("resolve local address: %w", err)
 	}

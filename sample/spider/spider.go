@@ -138,8 +138,10 @@ func main() {
 	d := dht.New(config)
 
 	// Print public address
-	if addr := d.PublicAddr(); addr != nil {
+	if addr := d.PublicAddr(); addr != nil && addr.IP != nil {
 		log.Printf("📡 Public address: %s", addr.String())
+	} else if d.PublicAddr() != nil && d.PublicAddr().IP == nil {
+		log.Println("⚠️  NAT discovery failed — running in outbound-only mode (crawler still works)")
 	}
 
 	// Stats goroutine
