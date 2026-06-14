@@ -33,6 +33,7 @@ func main() {
 	natFlag := flag.Bool("nat", false, "Enable NAT traversal via STUN")
 	publicIP := flag.String("public-ip", "", "Manual public IP (overrides STUN)")
 	publicPort := flag.Int("public-port", 0, "Manual public port")
+	dhtPort := flag.Int("port", 16881, "DHT UDP listen port (default 16881; ISPs often block 6881)")
 	logFile := flag.String("log", "", "Write output to file (JSONL)")
 	statsInterval := flag.Int("stats", 30, "Print stats every N seconds (0=off)")
 	flag.Parse()
@@ -113,16 +114,19 @@ func main() {
 	var config *dht.Config
 	if *natFlag {
 		config = dht.NewNATCrawlConfig()
-		log.Println("✅ NAT traversal enabled (STUN)")
+		config.Address = fmt.Sprintf(":%d", *dhtPort)
+		log.Printf("✅ NAT traversal enabled (STUN), port %d", *dhtPort)
 	} else if *publicIP != "" {
 		port := *publicPort
 		if port == 0 {
-			port = 6881
+			port = *dhtPort
 		}
 		config = dht.NewNATCrawlConfigWithIP(*publicIP, port)
+		config.Address = fmt.Sprintf(":%d", *dhtPort)
 		log.Printf("✅ NAT traversal enabled (manual: %s:%d)", *publicIP, port)
 	} else {
 		config = dht.NewCrawlConfig()
+		config.Address = fmt.Sprintf(":%d", *dhtPort)
 	}
 
 	config.OnGetPeers = func(infoHash, ip string, port int) {
